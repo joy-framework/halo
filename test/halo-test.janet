@@ -2,6 +2,6 @@
 
 (defn handler [request]
   (print request)
-  {:status 200 :body "ITS WORKING. SUCH A CRAPPY SERVER BUT STILL" :headers {"Content-Type" "text/plain"}})
+  {:status 200 :body "It's working! It's working!" :headers {"Content-Type" "text/plain"}})
 
 (halo/server handler 8080)
