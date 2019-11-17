@@ -15,6 +15,7 @@
 #include <netinet/in.h>
 
 #include "sds.h"
+#include "picohttpparser.h"
 
 // Shamelessly stolen from https://github.com/civetweb/civetweb
 const char * response_code_text(int response_code) {
@@ -280,18 +281,49 @@ sds build_http_response(Janet res) {
 }
 
 
+static Janet build_http_request(const char *method, int method_len, const char *path, int path_len, int minor_version, struct phr_header req_headers[100], size_t num_headers) {
+  JanetTable *payload = janet_table(4);
+
+  //janet_table_put(payload, janet_ckeywordv("body"), mg2janetstr(request->body));
+  janet_table_put(payload, janet_ckeywordv("uri"), janet_stringv(path, path_len));
+  //janet_table_put(payload, janet_ckeywordv("query-string"), janet_wrap_string(janet_cstring(method)));
+  janet_table_put(payload, janet_ckeywordv("method"), janet_stringv(method, method_len));
+  janet_table_put(payload, janet_ckeywordv("protocol"), janet_wrap_string(janet_cstring(sdscatprintf(sdsempty(), "HTTP 1.%d", minor_version))));
+  //janet_table_put(payload, janet_ckeywordv("connection"), janet_wrap_abstract(c->user_data));
+
+  /* Add headers */
+  JanetTable *headers = janet_table(num_headers);
+  for (int i = 0; i < (int)num_headers; i++) {
+      if ((int)req_headers[i].value_len == 0)
+          break;
+
+      janet_table_put(headers,
+              janet_stringv(req_headers[i].name, req_headers[i].name_len),
+              janet_stringv(req_headers[i].value, req_headers[i].value_len));
+  }
+
+  janet_table_put(payload, janet_ckeywordv("headers"), janet_wrap_table(headers));
+
+  return janet_wrap_table(payload);
+}
+
 int server(JanetFunction *handler, int32_t port, const uint8_t *ip_address) {
   struct sockaddr_in server_address;
   int server_fd;
 
-  printf("server");
+  const char *method;
+  size_t method_len;
+  const char *path;
+  size_t path_len;
+  int minor_version;
+  struct phr_header headers[100];
+  size_t num_headers;
+  size_t prevbuflen = 0;
 
   if ((server_fd = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0) {
     fprintf(stderr, "Problem acquiring socket: %s\n", strerror(errno));
     exit(1);
   }
-
-  printf("server");
 
   int opt_reuse_addr = 1;
   setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt_reuse_addr,
@@ -317,13 +349,6 @@ int server(JanetFunction *handler, int32_t port, const uint8_t *ip_address) {
   const int RECEIVE_SIZE = 1024;
   char receive_buf[RECEIVE_SIZE];
   int received_bytes = 1;
-
-  // char *response =
-  //   "HTTP/1.1 200 OK\n"
-  //   "Content-Type: text/html;\n\n"
-  //   "Hello world!";
-  //
-  // int response_size = strlen(response) * sizeof(char);
 
   int kq = kqueue();
   struct kevent ev_set;
@@ -384,9 +409,19 @@ int server(JanetFunction *handler, int32_t port, const uint8_t *ip_address) {
           }
 
           receive_buf[received_bytes] = '\0';
+          num_headers = sizeof(headers) / sizeof(headers[0]);
+          int pret = phr_parse_request(receive_buf, received_bytes, &method, &method_len, &path, &path_len, &minor_version, headers, &num_headers, prevbuflen);
+
+          if (pret <= 0) {
+            fprintf(stderr, "Error parsing http %s\n", strerror(errno));
+            close(ev_list[event_iter].ident);
+            break;
+          }
+
 
           Janet jarg[1];
-          jarg[0] = janet_wrap_string(janet_cstring(receive_buf));
+          //jarg[0] = janet_wrap_string(janet_cstring(receive_buf));
+          jarg[0] = build_http_request(method, method_len, path, path_len, minor_version, headers, num_headers);
           Janet janet_response = janet_call(handler, 1, jarg);
 
           sds response = build_http_response(janet_response);
