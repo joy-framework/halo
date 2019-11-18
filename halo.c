@@ -253,7 +253,7 @@ int server(JanetFunction *handler, int32_t port, const uint8_t *ip_address) {
             break;
           }
 
-          payload = janet_table(3);
+          payload = janet_table(4);
           headers = janet_table(50);
           nparsed = http_parser_execute(&parser, &settings, receive_buf, received_bytes);
 
