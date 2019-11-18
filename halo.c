@@ -155,10 +155,6 @@ int server(JanetFunction *handler, int32_t port, const uint8_t *ip_address) {
   struct sockaddr_in server_address;
   int server_fd;
 
-  int nparsed = 0;
-  http_parser parser;
-  http_parser_init(&parser, HTTP_REQUEST);
-
   // Init http parser callbacks
   http_parser_settings settings;
   settings.on_message_begin     = message_begin_cb;
@@ -253,14 +249,18 @@ int server(JanetFunction *handler, int32_t port, const uint8_t *ip_address) {
             break;
           }
 
+          receive_buf[received_bytes] = '\0';
           payload = janet_table(4);
           headers = janet_table(50);
+          int nparsed = 0;
+          http_parser parser;
+          http_parser_init(&parser, HTTP_REQUEST);
           nparsed = http_parser_execute(&parser, &settings, receive_buf, received_bytes);
 
           if (nparsed != received_bytes) {
             fprintf(stderr, "nparsed: %d\n", nparsed);
             fprintf(stderr, "received_bytes: %d\n", received_bytes);
-            fprintf(stderr, "Error parsing http %s\n", strerror(errno));
+            fprintf(stderr, "Error parsing http %s\n", http_errno_description(errno));
             close(ev_list[event_iter].ident);
             break;
           }
@@ -277,7 +277,6 @@ int server(JanetFunction *handler, int32_t port, const uint8_t *ip_address) {
           send(ev_list[event_iter].ident, response, response_size, 0);
 
           sdsfree(response);
-          response_size = NULL;
 
           ev_list[event_iter].flags = ev_list[event_iter].flags ^ EV_EOF;
         }
