@@ -97,14 +97,15 @@ int message_begin_cb(struct http_parser *parser) {
 int header_field_cb(struct http_parser *parser, const char *p, unsigned long len) {
   (void)parser;
 
-  prev_header_name = janet_ckeywordv(janet_string((uint8_t *)p, len));
+  prev_header_name = janet_cstringv(janet_string((uint8_t *)p, len));
+
   return 0;
 }
 
 int header_value_cb(struct http_parser *parser, const char *p, unsigned long len) {
   (void)parser;
 
-  janet_table_put(payload, prev_header_name, janet_wrap_string(janet_string((uint8_t *)p, len)));
+  janet_table_put(headers, prev_header_name, janet_wrap_string(janet_string((uint8_t *)p, len)));
   return 0;
 }
 
@@ -119,7 +120,7 @@ int status_cb(struct http_parser *parser, const char *p, unsigned long len) {
 int url_cb(struct http_parser *parser, const char *p, unsigned long len) {
   (void)parser;
 
-  janet_table_put(payload, janet_ckeywordv("uri"), janet_wrap_string(janet_string(p, len)));
+  janet_table_put(payload, janet_ckeywordv("uri"), janet_wrap_string(janet_string((const uint8_t *)p, len)));
 
   return 0;
 }
@@ -127,7 +128,7 @@ int url_cb(struct http_parser *parser, const char *p, unsigned long len) {
 int body_cb(struct http_parser *parser, const char *p, unsigned long len) {
   (void)parser;
 
-  janet_table_put(payload, janet_ckeywordv("body"), janet_wrap_string(janet_cstring(p)));
+  janet_table_put(payload, janet_ckeywordv("body"), janet_wrap_string(janet_string((const uint8_t *)p, len)));
 
   return 0;
 }
@@ -256,8 +257,8 @@ int server(JanetFunction *handler, int32_t port, const uint8_t *ip_address) {
             break;
           }
 
-          payload = janet_table(6);
-          headers = janet_table(100);
+          payload = janet_table(3);
+          headers = janet_table(50);
           nparsed = http_parser_execute(&parser, &settings, receive_buf, received_bytes);
 
           // printf("%s\n", http_method_str(parser.method));
@@ -272,7 +273,7 @@ int server(JanetFunction *handler, int32_t port, const uint8_t *ip_address) {
           }
 
           Janet jarg[1];
-          //jarg[0] = janet_wrap_string(janet_cstring(receive_buf));
+          janet_table_put(payload, janet_ckeywordv("headers"), janet_wrap_table(headers));
           jarg[0] = janet_wrap_table(payload);
           Janet janet_response = janet_call(handler, 1, jarg);
 
