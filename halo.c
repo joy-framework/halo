@@ -91,6 +91,7 @@ Janet prev_header_name;
 
 int message_begin_cb(struct http_parser *parser) {
   (void)parser;
+
   return 0;
 }
 
@@ -223,11 +224,8 @@ int server(JanetFunction *handler, int32_t port, const uint8_t *ip_address) {
       exit(1);
     }
 
-    //printf("New events from the kernel. Count: %d\n", event_count);
-
     for (event_iter = 0; event_iter < event_count; event_iter++) {
       if (ev_list[event_iter].ident == server_fd) {
-        //printf("New connection, setting up accept\n");
         if ((client_fd = accept(ev_list[event_iter].ident,
                 (struct sockaddr *) &client_addr, &client_addr_len)) < 0) {
           fprintf(stderr, "Problem accepting new connection: %s\n",
@@ -245,8 +243,6 @@ int server(JanetFunction *handler, int32_t port, const uint8_t *ip_address) {
         }
       } else {
         if (ev_list[event_iter].flags & EVFILT_READ) {
-          //printf("Read event from client: 0x%016" PRIXPTR "\n",
-           //   ev_list[event_iter].ident);
 
           received_bytes = recv(ev_list[event_iter].ident, receive_buf,
               sizeof(receive_buf), 0);
@@ -260,9 +256,6 @@ int server(JanetFunction *handler, int32_t port, const uint8_t *ip_address) {
           payload = janet_table(3);
           headers = janet_table(50);
           nparsed = http_parser_execute(&parser, &settings, receive_buf, received_bytes);
-
-          // printf("%s\n", http_method_str(parser.method));
-          // printf("%hu.%hu\n", parser->http_major, parser->http_minor);
 
           if (nparsed != received_bytes) {
             fprintf(stderr, "nparsed: %d\n", nparsed);
@@ -281,31 +274,15 @@ int server(JanetFunction *handler, int32_t port, const uint8_t *ip_address) {
           response = build_http_response(response, janet_response);
           int response_size = (int)sdslen(response);
 
-          // printf("Read %d bytes from client: 0x%016" PRIXPTR "\n",
-          //     received_bytes,
-          //     ev_list[event_iter].ident);
-          //
-          //
-          // for (int i = 0; i < received_bytes; i++) {
-          //   printf("%c", receive_buf[i]);
-          // }
-          //
-          // printf("\n");
-
-          int bytes_sent = send(ev_list[event_iter].ident,
-              response, response_size, 0);
+          send(ev_list[event_iter].ident, response, response_size, 0);
 
           sdsfree(response);
-
-          // printf("Sent %d/%d bytes to client: 0x%016" PRIXPTR "\n", bytes_sent,
-          //     response_size, ev_list[event_iter].ident);
+          response_size = NULL;
 
           ev_list[event_iter].flags = ev_list[event_iter].flags ^ EV_EOF;
         }
 
         if (ev_list[event_iter].flags & EV_EOF) {
-          //printf("EOF set for 0x%016" PRIXPTR "\n", ev_list[event_iter].ident);
-
           EV_SET(&ev_set, ev_list[event_iter].ident, EVFILT_READ, EV_DELETE,
               0, 0, NULL);
 
@@ -318,7 +295,6 @@ int server(JanetFunction *handler, int32_t port, const uint8_t *ip_address) {
 
           close(ev_list[event_iter].ident);
 
-          //printf("Connection closed\n");
         }
       }
     }
@@ -331,7 +307,7 @@ Janet cfun_start_server(int32_t argc, Janet *argv) {
   janet_fixarity(argc, 3);
 
   JanetFunction *handler = janet_getfunction(argv, 0);
-  int32_t port = janet_getinteger(argv, 1);
+  const int32_t port = janet_getinteger(argv, 1);
   const uint8_t *ip_address = janet_getstring(argv, 2);
 
   server(handler, port, ip_address);
