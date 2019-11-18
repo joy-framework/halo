@@ -18,9 +18,7 @@
 #include "http_parser.h"
 
 
-sds build_http_response(Janet res) {
-  sds response_string = sdsempty();
-
+sds build_http_response(sds response_string, Janet res) {
   switch (janet_type(res)) {
       case JANET_TABLE:
       case JANET_STRUCT:
@@ -62,7 +60,7 @@ sds build_http_response(Janet res) {
             }
 
             const char *code_text = http_status_str(code);
-            response_string = sdscatprintf(sdsempty(), "HTTP/1.1 %d %s\n", code, code_text);
+            response_string = sdscatprintf(response_string, "HTTP/1.1 %d %s\n", code, code_text);
 
             for (const JanetKV *kv = janet_dictionary_next(headerkvs, headercap, NULL);
                     kv;
@@ -135,9 +133,12 @@ int body_cb(struct http_parser *parser, const char *p, unsigned long len) {
 }
 
 int headers_complete_cb(http_parser *parser) {
+  sds http_version = sdscatprintf(sdsempty(), "%hu.%hu", parser->http_major, parser->http_minor);
+
   janet_table_put(payload, janet_ckeywordv("method"), janet_wrap_string(janet_cstring(http_method_str(parser->method))));
-  janet_table_put(payload, janet_ckeywordv("http-version"), janet_wrap_string(janet_cstring(sdscatprintf(sdsempty(), "%hu.%hu", parser->http_major, parser->http_minor))));
-  janet_table_put(payload, janet_ckeywordv("keep-alive"), janet_wrap_boolean(http_should_keep_alive(parser)));
+  janet_table_put(payload, janet_ckeywordv("http-version"), janet_wrap_string(janet_cstring(http_version)));
+
+  sdsfree(http_version);
 
   return 0;
 }
@@ -275,7 +276,8 @@ int server(JanetFunction *handler, int32_t port, const uint8_t *ip_address) {
           jarg[0] = janet_wrap_table(payload);
           Janet janet_response = janet_call(handler, 1, jarg);
 
-          sds response = build_http_response(janet_response);
+          sds response = sdsempty();
+          response = build_http_response(response, janet_response);
           int response_size = (int)sdslen(response);
 
           // printf("Read %d bytes from client: 0x%016" PRIXPTR "\n",
