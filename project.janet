@@ -9,4 +9,4 @@
 (declare-native
   :name "halo"
   :embedded ["halo_lib.janet"]
-  :source ["halo.c" "sds.c" "picohttpparser.c"])
+  :source ["halo.c" "sds.c" "http_parser.c"])

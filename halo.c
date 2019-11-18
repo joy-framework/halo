@@ -15,201 +15,8 @@
 #include <netinet/in.h>
 
 #include "sds.h"
-#include "picohttpparser.h"
+#include "http_parser.h"
 
-// Shamelessly stolen from https://github.com/civetweb/civetweb
-const char * response_code_text(int response_code) {
-  /* See IANA HTTP status code assignment:
-   * http://www.iana.org/assignments/http-status-codes/http-status-codes.xhtml
-   */
-
-  switch (response_code) {
-    /* RFC2616 Section 10.1 - Informational 1xx */
-    case 100:
-      return "Continue"; /* RFC2616 Section 10.1.1 */
-    case 101:
-      return "Switching Protocols"; /* RFC2616 Section 10.1.2 */
-    case 102:
-      return "Processing"; /* RFC2518 Section 10.1 */
-
-    /* RFC2616 Section 10.2 - Successful 2xx */
-    case 200:
-      return "OK"; /* RFC2616 Section 10.2.1 */
-    case 201:
-      return "Created"; /* RFC2616 Section 10.2.2 */
-    case 202:
-      return "Accepted"; /* RFC2616 Section 10.2.3 */
-    case 203:
-      return "Non-Authoritative Information"; /* RFC2616 Section 10.2.4 */
-    case 204:
-      return "No Content"; /* RFC2616 Section 10.2.5 */
-    case 205:
-      return "Reset Content"; /* RFC2616 Section 10.2.6 */
-    case 206:
-      return "Partial Content"; /* RFC2616 Section 10.2.7 */
-    case 207:
-      return "Multi-Status"; /* RFC2518 Section 10.2, RFC4918 Section 11.1 */
-    case 208:
-      return "Already Reported"; /* RFC5842 Section 7.1 */
-
-    case 226:
-      return "IM used"; /* RFC3229 Section 10.4.1 */
-
-    /* RFC2616 Section 10.3 - Redirection 3xx */
-    case 300:
-      return "Multiple Choices"; /* RFC2616 Section 10.3.1 */
-    case 301:
-      return "Moved Permanently"; /* RFC2616 Section 10.3.2 */
-    case 302:
-      return "Found"; /* RFC2616 Section 10.3.3 */
-    case 303:
-      return "See Other"; /* RFC2616 Section 10.3.4 */
-    case 304:
-      return "Not Modified"; /* RFC2616 Section 10.3.5 */
-    case 305:
-      return "Use Proxy"; /* RFC2616 Section 10.3.6 */
-    case 307:
-      return "Temporary Redirect"; /* RFC2616 Section 10.3.8 */
-    case 308:
-      return "Permanent Redirect"; /* RFC7238 Section 3 */
-
-    /* RFC2616 Section 10.4 - Client Error 4xx */
-    case 400:
-      return "Bad Request"; /* RFC2616 Section 10.4.1 */
-    case 401:
-      return "Unauthorized"; /* RFC2616 Section 10.4.2 */
-    case 402:
-      return "Payment Required"; /* RFC2616 Section 10.4.3 */
-    case 403:
-      return "Forbidden"; /* RFC2616 Section 10.4.4 */
-    case 404:
-      return "Not Found"; /* RFC2616 Section 10.4.5 */
-    case 405:
-      return "Method Not Allowed"; /* RFC2616 Section 10.4.6 */
-    case 406:
-      return "Not Acceptable"; /* RFC2616 Section 10.4.7 */
-    case 407:
-      return "Proxy Authentication Required"; /* RFC2616 Section 10.4.8 */
-    case 408:
-      return "Request Time-out"; /* RFC2616 Section 10.4.9 */
-    case 409:
-      return "Conflict"; /* RFC2616 Section 10.4.10 */
-    case 410:
-      return "Gone"; /* RFC2616 Section 10.4.11 */
-    case 411:
-      return "Length Required"; /* RFC2616 Section 10.4.12 */
-    case 412:
-      return "Precondition Failed"; /* RFC2616 Section 10.4.13 */
-    case 413:
-      return "Request Entity Too Large"; /* RFC2616 Section 10.4.14 */
-    case 414:
-      return "Request-URI Too Large"; /* RFC2616 Section 10.4.15 */
-    case 415:
-      return "Unsupported Media Type"; /* RFC2616 Section 10.4.16 */
-    case 416:
-      return "Requested range not satisfiable"; /* RFC2616 Section 10.4.17 */
-    case 417:
-      return "Expectation Failed"; /* RFC2616 Section 10.4.18 */
-
-    case 421:
-      return "Misdirected Request"; /* RFC7540 Section 9.1.2 */
-    case 422:
-      return "Unproccessable entity"; /* RFC2518 Section 10.3, RFC4918
-                                     * Section 11.2 */
-    case 423:
-      return "Locked"; /* RFC2518 Section 10.4, RFC4918 Section 11.3 */
-    case 424:
-      return "Failed Dependency"; /* RFC2518 Section 10.5, RFC4918
-                                 * Section 11.4 */
-
-    case 426:
-      return "Upgrade Required"; /* RFC 2817 Section 4 */
-
-    case 428:
-      return "Precondition Required"; /* RFC 6585, Section 3 */
-    case 429:
-      return "Too Many Requests"; /* RFC 6585, Section 4 */
-
-    case 431:
-      return "Request Header Fields Too Large"; /* RFC 6585, Section 5 */
-
-    case 451:
-      return "Unavailable For Legal Reasons"; /* draft-tbray-http-legally-restricted-status-05,
-                                             * Section 3 */
-
-    /* RFC2616 Section 10.5 - Server Error 5xx */
-    case 500:
-      return "Internal Server Error"; /* RFC2616 Section 10.5.1 */
-    case 501:
-      return "Not Implemented"; /* RFC2616 Section 10.5.2 */
-    case 502:
-      return "Bad Gateway"; /* RFC2616 Section 10.5.3 */
-    case 503:
-      return "Service Unavailable"; /* RFC2616 Section 10.5.4 */
-    case 504:
-      return "Gateway Time-out"; /* RFC2616 Section 10.5.5 */
-    case 505:
-      return "HTTP Version not supported"; /* RFC2616 Section 10.5.6 */
-    case 506:
-      return "Variant Also Negotiates"; /* RFC 2295, Section 8.1 */
-    case 507:
-      return "Insufficient Storage"; /* RFC2518 Section 10.6, RFC4918
-                                    * Section 11.5 */
-    case 508:
-      return "Loop Detected"; /* RFC5842 Section 7.1 */
-
-    case 510:
-      return "Not Extended"; /* RFC 2774, Section 7 */
-    case 511:
-      return "Network Authentication Required"; /* RFC 6585, Section 6 */
-
-    /* Other status codes, not shown in the IANA HTTP status code assignment.
-     * E.g., "de facto" standards due to common use, ... */
-    case 418:
-      return "I am a teapot"; /* RFC2324 Section 2.3.2 */
-    case 419:
-      return "Authentication Timeout"; /* common use */
-    case 420:
-      return "Enhance Your Calm"; /* common use */
-    case 440:
-      return "Login Timeout"; /* common use */
-    case 509:
-      return "Bandwidth Limit Exceeded"; /* common use */
-
-  default:
-    /* This error code is unknown. This should not happen. */
-    printf("Unknown HTTP response code: %d", response_code);
-
-    /* Return at least a category according to RFC 2616 Section 10. */
-    if (response_code >= 100 && response_code < 200) {
-      /* Unknown informational status code */
-      return "Information";
-    }
-
-    if (response_code >= 200 && response_code < 300) {
-      /* Unknown success code */
-      return "Success";
-    }
-
-    if (response_code >= 300 && response_code < 400) {
-      /* Unknown redirection code */
-      return "Redirection";
-    }
-
-    if (response_code >= 400 && response_code < 500) {
-      /* Unknown request error code */
-      return "Client Error";
-    }
-
-    if (response_code >= 500 && response_code < 600) {
-      /* Unknown server error code */
-      return "Server Error";
-    }
-
-    /* Response code not even within reasonable range */
-    return "";
-  }
-}
 
 sds build_http_response(Janet res) {
   sds response_string = sdsempty();
@@ -254,7 +61,7 @@ sds build_http_response(Janet res) {
               break;
             }
 
-            const char * code_text = response_code_text(code);
+            const char *code_text = http_status_str(code);
             response_string = sdscatprintf(sdsempty(), "HTTP/1.1 %d %s\n", code, code_text);
 
             for (const JanetKV *kv = janet_dictionary_next(headerkvs, headercap, NULL);
@@ -280,45 +87,85 @@ sds build_http_response(Janet res) {
   return response_string;
 }
 
+JanetTable *payload;
+JanetTable *headers;
+Janet prev_header_name;
 
-static Janet build_http_request(const char *method, int method_len, const char *path, int path_len, int minor_version, struct phr_header req_headers[100], size_t num_headers) {
-  JanetTable *payload = janet_table(4);
+int message_begin_cb(struct http_parser *parser) {
+  (void)parser;
+  return 0;
+}
 
-  //janet_table_put(payload, janet_ckeywordv("body"), mg2janetstr(request->body));
-  janet_table_put(payload, janet_ckeywordv("uri"), janet_stringv(path, path_len));
-  //janet_table_put(payload, janet_ckeywordv("query-string"), janet_wrap_string(janet_cstring(method)));
-  janet_table_put(payload, janet_ckeywordv("method"), janet_stringv(method, method_len));
-  janet_table_put(payload, janet_ckeywordv("protocol"), janet_wrap_string(janet_cstring(sdscatprintf(sdsempty(), "HTTP 1.%d", minor_version))));
-  //janet_table_put(payload, janet_ckeywordv("connection"), janet_wrap_abstract(c->user_data));
+int header_field_cb(struct http_parser *parser, const char *p, unsigned long len) {
+  (void)parser;
 
-  /* Add headers */
-  JanetTable *headers = janet_table(num_headers);
-  for (int i = 0; i < (int)num_headers; i++) {
-      if ((int)req_headers[i].value_len == 0)
-          break;
+  prev_header_name = janet_ckeywordv(janet_string((uint8_t *)p, len));
+  return 0;
+}
 
-      janet_table_put(headers,
-              janet_stringv(req_headers[i].name, req_headers[i].name_len),
-              janet_stringv(req_headers[i].value, req_headers[i].value_len));
-  }
+int header_value_cb(struct http_parser *parser, const char *p, unsigned long len) {
+  (void)parser;
 
-  janet_table_put(payload, janet_ckeywordv("headers"), janet_wrap_table(headers));
+  janet_table_put(payload, prev_header_name, janet_wrap_string(janet_string((uint8_t *)p, len)));
+  return 0;
+}
 
-  return janet_wrap_table(payload);
+int status_cb(struct http_parser *parser, const char *p, unsigned long len) {
+  (void)parser;
+  (void)p;
+  (void)len;
+
+  return 0;
+}
+
+int url_cb(struct http_parser *parser, const char *p, unsigned long len) {
+  (void)parser;
+
+  janet_table_put(payload, janet_ckeywordv("uri"), janet_wrap_string(janet_string(p, len)));
+
+  return 0;
+}
+
+int body_cb(struct http_parser *parser, const char *p, unsigned long len) {
+  (void)parser;
+
+  janet_table_put(payload, janet_ckeywordv("body"), janet_wrap_string(janet_cstring(p)));
+
+  return 0;
+}
+
+int headers_complete_cb(http_parser *parser) {
+  janet_table_put(payload, janet_ckeywordv("method"), janet_wrap_string(janet_cstring(http_method_str(parser->method))));
+  janet_table_put(payload, janet_ckeywordv("http-version"), janet_wrap_string(janet_cstring(sdscatprintf(sdsempty(), "%hu.%hu", parser->http_major, parser->http_minor))));
+  janet_table_put(payload, janet_ckeywordv("keep-alive"), janet_wrap_boolean(http_should_keep_alive(parser)));
+
+  return 0;
+}
+
+int message_complete_cb(struct http_parser *parser) {
+  (void)parser;
+
+  return 0;
 }
 
 int server(JanetFunction *handler, int32_t port, const uint8_t *ip_address) {
   struct sockaddr_in server_address;
   int server_fd;
 
-  const char *method;
-  size_t method_len;
-  const char *path;
-  size_t path_len;
-  int minor_version;
-  struct phr_header headers[100];
-  size_t num_headers;
-  size_t prevbuflen = 0;
+  int nparsed = 0;
+  http_parser parser;
+  http_parser_init(&parser, HTTP_REQUEST);
+
+  // Init http parser callbacks
+  http_parser_settings settings;
+  settings.on_message_begin     = message_begin_cb;
+  settings.on_header_field      = header_field_cb;
+  settings.on_header_value      = header_value_cb;
+  settings.on_status            = status_cb;
+  settings.on_url               = url_cb;
+  settings.on_body              = body_cb;
+  settings.on_headers_complete  = headers_complete_cb;
+  settings.on_message_complete  = message_complete_cb;
 
   if ((server_fd = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0) {
     fprintf(stderr, "Problem acquiring socket: %s\n", strerror(errno));
@@ -408,20 +255,24 @@ int server(JanetFunction *handler, int32_t port, const uint8_t *ip_address) {
             break;
           }
 
-          receive_buf[received_bytes] = '\0';
-          num_headers = sizeof(headers) / sizeof(headers[0]);
-          int pret = phr_parse_request(receive_buf, received_bytes, &method, &method_len, &path, &path_len, &minor_version, headers, &num_headers, prevbuflen);
+          payload = janet_table(6);
+          headers = janet_table(100);
+          nparsed = http_parser_execute(&parser, &settings, receive_buf, received_bytes);
 
-          if (pret <= 0) {
+          // printf("%s\n", http_method_str(parser.method));
+          // printf("%hu.%hu\n", parser->http_major, parser->http_minor);
+
+          if (nparsed != received_bytes) {
+            fprintf(stderr, "nparsed: %d\n", nparsed);
+            fprintf(stderr, "received_bytes: %d\n", received_bytes);
             fprintf(stderr, "Error parsing http %s\n", strerror(errno));
             close(ev_list[event_iter].ident);
             break;
           }
 
-
           Janet jarg[1];
           //jarg[0] = janet_wrap_string(janet_cstring(receive_buf));
-          jarg[0] = build_http_request(method, method_len, path, path_len, minor_version, headers, num_headers);
+          jarg[0] = janet_wrap_table(payload);
           Janet janet_response = janet_call(handler, 1, jarg);
 
           sds response = build_http_response(janet_response);
@@ -440,6 +291,8 @@ int server(JanetFunction *handler, int32_t port, const uint8_t *ip_address) {
 
           int bytes_sent = send(ev_list[event_iter].ident,
               response, response_size, 0);
+
+          sdsfree(response);
 
           // printf("Sent %d/%d bytes to client: 0x%016" PRIXPTR "\n", bytes_sent,
           //     response_size, ev_list[event_iter].ident);
