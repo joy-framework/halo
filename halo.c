@@ -258,7 +258,7 @@ int server(JanetFunction *handler, int32_t port, const uint8_t *ip_address) {
           nparsed = http_parser_execute(&parser, &settings, receive_buf, received_bytes);
 
           // hack for safari
-          if(janet_equals(janet_wrap_nil(), janet_table_get(payload, janet_ckeywordv("body")))) {
+          if((int)parser.content_length > 0 && (int)parser.content_length + nparsed != received_bytes) {
               received_bytes = recv(ev_list[event_iter].ident, receive_buf,
                   sizeof(receive_buf), 0);
 

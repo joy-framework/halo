@@ -46,7 +46,6 @@
 
 
 (defn post-form [request]
-  (printf "%q" request)
   {:status 200
    :body "<!doctype html><html><body>
       <h1>Form submitted.</h1>
