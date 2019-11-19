@@ -219,6 +219,8 @@ Janet cfun_stop_server(int32_t argc, Janet *argv) {
   (void)argv;
 
   sb_close_server(server);
+
+  return janet_wrap_nil();
 }
 
 static const JanetReg cfuns[] = {
