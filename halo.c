@@ -79,7 +79,7 @@ void send_http_response(sb_Event *e, Janet res) {
         }
         break;
       default:
-        sb_send_status(e->stream, 500, "Internal Server Error");
+        sb_send_status(e->stream, 500, "Internal server error");
         sb_send_header(e->stream, "Content-Type", "text/plain");
         sb_writef(e->stream, "Internal Server Error");
         break;
