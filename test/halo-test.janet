@@ -69,4 +69,4 @@
              (logger)))
 
 
-(halo/server app 8080 "0.0.0.0")
+(halo/server app 8080)
