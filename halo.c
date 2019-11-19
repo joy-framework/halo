@@ -2,6 +2,9 @@
 #include <string.h>
 #include <stdlib.h>
 #include <janet.h>
+#include <dirent.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 #include "sds.h"
 #include "http_parser.h"
 #include "sandbird.h"
@@ -22,6 +25,35 @@ void send_http_response(sb_Event *e, Janet res) {
             const JanetKV *kvs;
             int32_t kvlen, kvcap;
             janet_dictionary_view(res, &kvs, &kvlen, &kvcap);
+
+            /* check for static files */
+            const uint8_t *file_path;
+            struct stat s;
+            int err;
+            Janet janet_filepath = janet_dictionary_get(kvs, kvcap, janet_ckeywordv("file"));
+
+            if(janet_checktype(janet_filepath, JANET_STRING)) {
+              file_path = janet_unwrap_string(janet_filepath);
+              /* Get file info */
+              err = stat((const char *)file_path, &s);
+
+              /* Does file exist? */
+              if (err == -1) {
+                sb_send_status(e->stream, 404, "Not found");
+                return;
+              }
+
+              // TODO Directories?
+
+              /* Handle file */
+              err = sb_send_file(e->stream, (const char *)file_path);
+
+              if (err) {
+                break;
+              } else {
+                return;
+              }
+            }
 
             /* Serve a generic HTTP response */
             Janet status = janet_dictionary_get(kvs, kvcap, janet_ckeywordv("status"));

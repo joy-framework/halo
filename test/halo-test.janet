@@ -16,6 +16,18 @@
     ret))
 
 
+(defn static-files [handler &opt root]
+  (default root ".")
+  (fn [request]
+    (let [response (handler request)]
+      (if (not= 404 (get response :status))
+        response
+        (let [{:method method :uri uri} request]
+          (if (some (partial = method) ["GET" "HEAD"])
+            {:file (string root uri)}
+            {:status 500 :body "Internal server error" :headers {"Content-Type" "text/plain"}}))))))
+
+
 (defn router
   "Creates a router middleware"
   [routes]
@@ -65,6 +77,7 @@
 
 
 (def app (-> (router routes)
+             (static-files)
              (logger)))
 
 
