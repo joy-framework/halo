@@ -20,7 +20,6 @@
   "Creates a router middleware"
   [routes]
   (fn [request]
-    #(printf "%q\n" request)
     (let [{:uri uri :method method} request
           handler (get routes [method uri])]
       (if (nil? handler)
