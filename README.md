@@ -2,8 +2,6 @@
 
 Halo is an http server for [janet](https://github.com/janet-lang/janet)
 
-**This project is in early development so expect major changes**
-
 ```clojure
 (import halo)
 
