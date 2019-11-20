@@ -205,11 +205,11 @@ static int event_handler(sb_Event *e) {
 }
 
 Janet cfun_start_server(int32_t argc, Janet *argv) {
-  janet_fixarity(argc, 3);
+  janet_arity(argc, 2, 3);
 
   JanetFunction *janet_handler = janet_getfunction(argv, 0);
   const uint8_t *port = janet_getstring(argv, 1);
-  const uint8_t *ip_address = janet_getstring(argv, 2);
+  const uint8_t *ip_address = janet_optstring(argv, argc, 2, NULL);
 
   settings.on_message_begin     = message_begin_cb;
   settings.on_header_field      = header_field_cb;
@@ -223,7 +223,9 @@ Janet cfun_start_server(int32_t argc, Janet *argv) {
   memset(&opt, 0, sizeof(opt));
 
   opt.port = (char *)port;
-  opt.host = (char *)ip_address;
+  if(ip_address != NULL) {
+    opt.host = (char *)ip_address;
+  }
   opt.handler = event_handler;
   handler = janet_handler;
 
