@@ -196,7 +196,13 @@ static int event_handler(sb_Event *e) {
 
     Janet jarg[1];
     jarg[0] = janet_wrap_table(request_table);
-    Janet response = janet_call(handler, 1, jarg);
+    Janet response;
+    JanetFiber *fiber = janet_fiber(handler, 64, 1, jarg);
+    JanetFiberStatus status = janet_continue(fiber, janet_wrap_nil(), &response);
+    if (status != JANET_STATUS_DEAD && status != JANET_STATUS_PENDING) {
+        janet_stacktrace(fiber, response);
+        return SB_RES_CLOSE;
+    }
 
     send_http_response(e, response);
   }
