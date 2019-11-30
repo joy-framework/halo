@@ -127,7 +127,7 @@ int message_begin_cb(struct http_parser *parser) {
 int header_field_cb(struct http_parser *parser, const char *p, unsigned long len) {
   (void)parser;
 
-  prev_header_name = janet_cstringv(janet_string((uint8_t *)p, len));
+  prev_header_name = janet_wrap_string(janet_string((uint8_t *)p, len));
 
   return 0;
 }
@@ -198,10 +198,10 @@ static int event_handler(sb_Event *e) {
     jarg[0] = janet_wrap_table(request_table);
     Janet response;
     JanetFiber *fiber = janet_fiber(handler, 64, 1, jarg);
-    JanetFiberStatus status = janet_continue(fiber, janet_wrap_nil(), &response);
-    if (status != JANET_STATUS_DEAD && status != JANET_STATUS_PENDING) {
-        janet_stacktrace(fiber, response);
-        return SB_RES_CLOSE;
+    JanetSignal signal = janet_continue(fiber, jarg[0], &response);
+    if(signal != JANET_SIGNAL_OK) {
+      janet_stacktrace(fiber, response);
+      return SB_RES_CLOSE;
     }
 
     send_http_response(e, response);
