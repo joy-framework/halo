@@ -58,9 +58,9 @@
 
 (defn post-form [request]
   {:status 200
-   :body "<!doctype html><html><body>
-      <h1>Form submitted.</h1>
-    </body></html>"
+   :body (string "<!doctype html><html><body>
+      <h1>Form submitted with " (get request :body) " </h1>
+    </body></html>")
    :headers {"Content-Type" "text/html; charset=utf-8"}})
 
 
