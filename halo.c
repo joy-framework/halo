@@ -1,23 +1,17 @@
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
 #include <janet.h>
-#include <dirent.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include "sds.h"
 #include "http_parser.h"
-#include "sandbird.h"
+
+#define HTTPSERVER_IMPL
+#include "httpserver.h"
 
 JanetTable *request_table;
 JanetTable *headers;
 Janet prev_header_name;
 JanetFunction *handler;
 http_parser_settings settings;
-sb_Options opt;
-sb_Server *server;
+struct http_server_s* server;
 
-void send_http_response(sb_Event *e, Janet res) {
+void send_http_response(http_request_t* request, Janet res) {
   switch (janet_type(res)) {
       case JANET_TABLE:
       case JANET_STRUCT:
@@ -26,36 +20,6 @@ void send_http_response(sb_Event *e, Janet res) {
             int32_t kvlen, kvcap;
             janet_dictionary_view(res, &kvs, &kvlen, &kvcap);
 
-            /* check for static files */
-            const uint8_t *file_path;
-            struct stat s;
-            int err;
-            Janet janet_filepath = janet_dictionary_get(kvs, kvcap, janet_ckeywordv("file"));
-
-            if(janet_checktype(janet_filepath, JANET_STRING)) {
-              file_path = janet_unwrap_string(janet_filepath);
-              /* Get file info */
-              err = stat((const char *)file_path, &s);
-
-              /* Does file exist? */
-              if (err == -1) {
-                sb_send_status(e->stream, 404, "Not found");
-                return;
-              }
-
-              // TODO Directories?
-
-              /* Handle file */
-              err = sb_send_file(e->stream, (const char *)file_path);
-
-              if (err) {
-                break;
-              } else {
-                return;
-              }
-            }
-
-            /* Serve a generic HTTP response */
             Janet status = janet_dictionary_get(kvs, kvcap, janet_ckeywordv("status"));
             Janet headers = janet_dictionary_get(kvs, kvcap, janet_ckeywordv("headers"));
             Janet body = janet_dictionary_get(kvs, kvcap, janet_ckeywordv("body"));
@@ -67,7 +31,6 @@ void send_http_response(sb_Event *e, Janet res) {
                 code = janet_unwrap_integer(status);
             else
                 break;
-
 
             const JanetKV *headerkvs;
             int32_t headerlen, headercap;
@@ -88,32 +51,27 @@ void send_http_response(sb_Event *e, Janet res) {
               break;
             }
 
-            const char *code_text = http_status_str(code);
-            sb_send_status(e->stream, code, code_text);
+            struct http_response_s* response = http_response_init();
+
+            http_response_status(response, code);
 
             for (const JanetKV *kv = janet_dictionary_next(headerkvs, headercap, NULL);
                     kv;
                     kv = janet_dictionary_next(headerkvs, headercap, kv)) {
                 const uint8_t *name = janet_to_string(kv->key);
                 const uint8_t *value = janet_to_string(kv->value);
-                sb_send_header(e->stream, (const char *)name, (const char *)value);
+                http_response_header(response, (const char *)name, (const char *)value);
             }
 
             if (body_len > 0) {
-              int length = snprintf(NULL, 0, "%d", body_len);
-              char str[length];
-
-              sprintf(str, "%d", body_len);
-
-              sb_send_header(e->stream, "Content-Length", str);
-              sb_writef(e->stream, (const char *)body_bytes);
+              http_response_body(response, (const char *)body_bytes, body_len);
             }
+
+            http_respond(request, response);
         }
         break;
       default:
-        sb_send_status(e->stream, 500, "Internal server error");
-        sb_send_header(e->stream, "Content-Type", "text/plain");
-        sb_writef(e->stream, "Internal Server Error");
+        error_response(request, 500, "Internal server error");
         break;
   }
 }
@@ -177,45 +135,31 @@ int message_complete_cb(struct http_parser *parser) {
   return 0;
 }
 
-static int event_handler(sb_Event *e) {
-  if (e->type == SB_EV_REQUEST) {
+void handle_request(struct http_request_s* request) {
+  request_table = janet_table(5);
+  headers = janet_table(20);
+  int nparsed = 0;
+  http_parser parser;
+  http_parser_init(&parser, HTTP_REQUEST);
+  nparsed = http_parser_execute(&parser, &settings, request->buf, request->bytes);
 
-    request_table = janet_table(5);
-    headers = janet_table(20);
-    int nparsed = 0;
-    http_parser parser;
-    http_parser_init(&parser, HTTP_REQUEST);
-    nparsed = http_parser_execute(&parser, &settings, e->stream->recv_buf.s, e->stream->recv_buf.len);
-
-    // TODO while loop to parse all the streams
-    // keep calling e->stream->next until NULL
-    // multipart
-    //if(nparsed != e->stream->recv_buf.len) {
-      // parse next stream
-    //}
-
-    Janet jarg[1];
-    jarg[0] = janet_wrap_table(request_table);
-    Janet response;
-    JanetFiber *fiber = janet_fiber(handler, 64, 1, jarg);
-    JanetSignal signal = janet_continue(fiber, jarg[0], &response);
-    if(signal != JANET_SIGNAL_OK) {
-      janet_stacktrace(fiber, response);
-      return SB_RES_CLOSE;
-    }
-
-    send_http_response(e, response);
+  Janet jarg[1];
+  jarg[0] = janet_wrap_table(request_table);
+  Janet response;
+  JanetFiber *fiber = janet_fiber(handler, 64, 1, jarg);
+  JanetSignal signal = janet_continue(fiber, jarg[0], &response);
+  if(signal != JANET_SIGNAL_OK) {
+    janet_stacktrace(fiber, response);
+  } else {
+    send_http_response(request, response);
   }
-
-  return SB_RES_OK;
 }
 
 Janet cfun_start_server(int32_t argc, Janet *argv) {
   janet_arity(argc, 2, 3);
 
   JanetFunction *janet_handler = janet_getfunction(argv, 0);
-  const uint8_t *port = janet_getstring(argv, 1);
-  const uint8_t *ip_address = janet_optstring(argv, argc, 2, NULL);
+  int32_t port = janet_getinteger(argv, 1);
 
   settings.on_message_begin     = message_begin_cb;
   settings.on_header_field      = header_field_cb;
@@ -226,16 +170,10 @@ Janet cfun_start_server(int32_t argc, Janet *argv) {
   settings.on_headers_complete  = headers_complete_cb;
   settings.on_message_complete  = message_complete_cb;
 
-  memset(&opt, 0, sizeof(opt));
-
-  opt.port = (char *)port;
-  if(ip_address != NULL) {
-    opt.host = (char *)ip_address;
-  }
-  opt.handler = event_handler;
   handler = janet_handler;
 
-  server = sb_new_server(&opt);
+  server = http_server_init(port, handle_request);
+  http_server_listen_poll(server);
 
   if (!server) {
     janet_panicf("failed to intialize server\n");
@@ -245,11 +183,10 @@ Janet cfun_start_server(int32_t argc, Janet *argv) {
 }
 
 Janet cfun_poll_server(int32_t argc, Janet *argv) {
-  janet_fixarity(argc, 1);
+  janet_fixarity(argc, 0);
+  (void)argv;
 
-  int32_t timeout = janet_getinteger(argv, 0);
-
-  sb_poll_server(server, timeout);
+  http_server_poll(server);
 
   return janet_wrap_nil();
 }
@@ -257,8 +194,6 @@ Janet cfun_poll_server(int32_t argc, Janet *argv) {
 Janet cfun_stop_server(int32_t argc, Janet *argv) {
   janet_fixarity(argc, 0);
   (void)argv;
-
-  sb_close_server(server);
 
   return janet_wrap_nil();
 }

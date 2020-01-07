@@ -1,7 +1,7 @@
 (defn server
-  "Creates a simple http server"
-  [handler port &opt ip-address]
-  (print (string/format "Server listening on [%s:%d] ..." (or ip-address "localhost") port))
-  (start-server handler (string port) ip-address)
+  "Starts an http server"
+  [handler port]
+  (start-server handler port)
+  (printf "Server listening on [localhost:%d] ..." port)
   (while true
-    (poll-server 1000)))
+    (poll-server)))

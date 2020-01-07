@@ -1,6 +1,6 @@
 (declare-project
   :name "halo"
-  :description "Janet bindings for civetweb"
+  :description "A janet http server"
   :author "Sean Walker"
   :license "MIT"
   :url "https://github.com/joy-framework/halo"
@@ -9,4 +9,4 @@
 (declare-native
   :name "halo"
   :embedded ["halo_lib.janet"]
-  :source ["halo.c" "sandbird.c" "sds.c" "http_parser.c"])
+  :source ["halo.c" "http_parser.c"])
