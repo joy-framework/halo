@@ -198,6 +198,11 @@ static int event_handler(sb_Event *e) {
     jarg[0] = janet_wrap_table(request_table);
     Janet response;
     JanetFiber *fiber = janet_fiber(handler, 64, 1, jarg);
+    JanetFiber *janet_vm_fiber = janet_current_fiber();
+    if (!janet_vm_fiber->env) {
+        janet_vm_fiber->env = janet_table(0);
+    }
+    fiber->env = janet_vm_fiber->env;
     JanetSignal signal = janet_continue(fiber, jarg[0], &response);
     if(signal != JANET_SIGNAL_OK) {
       janet_stacktrace(fiber, response);
