@@ -5,7 +5,6 @@
 #include <dirent.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include "sds.h"
 #include "http_parser.h"
 #include "sandbird.h"
 
