@@ -1,59 +1,42 @@
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
 #include <janet.h>
-#include <dirent.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include "sds.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include "http_parser.h"
-#include "sandbird.h"
+#include "sds.h"
+#include <uv.h>
+
+#define DEFAULT_BACKLOG 128
 
 JanetTable *request_table;
 JanetTable *headers;
 Janet prev_header_name;
 JanetFunction *handler;
 http_parser_settings settings;
-sb_Options opt;
-sb_Server *server;
+uv_loop_t *loop;
+struct sockaddr_in addr;
 
-void send_http_response(sb_Event *e, Janet res) {
-  switch (janet_type(res)) {
+typedef struct {
+    uv_write_t req;
+    uv_buf_t buf;
+} write_req_t;
+
+sds http_response(Janet janet_response) {
+  sds response = sdsnew("");
+
+  switch (janet_type(janet_response)) {
       case JANET_TABLE:
       case JANET_STRUCT:
         {
             const JanetKV *kvs;
             int32_t kvlen, kvcap;
-            janet_dictionary_view(res, &kvs, &kvlen, &kvcap);
+            janet_dictionary_view(janet_response, &kvs, &kvlen, &kvcap);
 
-            /* check for static files */
-            const uint8_t *file_path;
-            struct stat s;
-            int err;
-            Janet janet_filepath = janet_dictionary_get(kvs, kvcap, janet_ckeywordv("file"));
-
-            if(janet_checktype(janet_filepath, JANET_STRING)) {
-              file_path = janet_unwrap_string(janet_filepath);
-              /* Get file info */
-              err = stat((const char *)file_path, &s);
-
-              /* Does file exist? */
-              if (err == -1) {
-                sb_send_status(e->stream, 404, "Not found");
-                return;
-              }
-
-              // TODO Directories?
-
-              /* Handle file */
-              err = sb_send_file(e->stream, (const char *)file_path);
-
-              if (err) {
-                break;
-              } else {
-                return;
-              }
-            }
+            /* TODO static files? */
+            // const uint8_t *file_path;
+            // struct stat s;
+            // int err;
+            //Janet janet_filepath = janet_dictionary_get(kvs, kvcap, janet_ckeywordv("file"));
 
             /* Serve a generic HTTP response */
             Janet status = janet_dictionary_get(kvs, kvcap, janet_ckeywordv("status"));
@@ -61,13 +44,15 @@ void send_http_response(sb_Event *e, Janet res) {
             Janet body = janet_dictionary_get(kvs, kvcap, janet_ckeywordv("body"));
 
             int code;
-            if (janet_checktype(status, JANET_NIL))
+            if (janet_checktype(status, JANET_NIL)) {
                 code = 200;
-            else if (janet_checkint(status))
+            } else if (janet_checkint(status)) {
                 code = janet_unwrap_integer(status);
-            else
+            } else {
                 break;
+            }
 
+            response = sdscatprintf(response, "HTTP/1.1 %d %s\r\n", code, http_status_str(code));
 
             const JanetKV *headerkvs;
             int32_t headerlen, headercap;
@@ -88,15 +73,12 @@ void send_http_response(sb_Event *e, Janet res) {
               break;
             }
 
-            const char *code_text = http_status_str(code);
-            sb_send_status(e->stream, code, code_text);
-
             for (const JanetKV *kv = janet_dictionary_next(headerkvs, headercap, NULL);
                     kv;
                     kv = janet_dictionary_next(headerkvs, headercap, kv)) {
                 const uint8_t *name = janet_to_string(kv->key);
                 const uint8_t *value = janet_to_string(kv->value);
-                sb_send_header(e->stream, (const char *)name, (const char *)value);
+                response = sdscatprintf(response, "%s: %s\r\n", (const char *)name, (const char *)value);
             }
 
             if (body_len > 0) {
@@ -105,18 +87,114 @@ void send_http_response(sb_Event *e, Janet res) {
 
               sprintf(str, "%d", body_len);
 
-              sb_send_header(e->stream, "Content-Length", str);
-              sb_writef(e->stream, (const char *)body_bytes);
+              response = sdscatprintf(response, "Content-Length: %s\r\n", str);
+              response = sdscatprintf(response, "\r\n%s", (char *)body_bytes);
             }
         }
         break;
       default:
-        sb_send_status(e->stream, 500, "Internal server error");
-        sb_send_header(e->stream, "Content-Type", "text/plain");
-        sb_writef(e->stream, "Internal Server Error");
+        response = sdscat(response, "HTTP 500 Internal server Error\r\nContent-Type: text/plain\r\nContent-Length: 22\r\n\r\nInternal Server Error\n");
         break;
   }
+
+  return response;
 }
+
+void free_write_req(uv_write_t *req) {
+    write_req_t *wr = (write_req_t*) req;
+    free(wr->buf.base);
+    free(wr);
+}
+
+void alloc_buffer(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
+    buf->base = (char*) malloc(suggested_size);
+    buf->len = suggested_size;
+}
+
+void on_close(uv_handle_t* handle) {
+    free(handle);
+}
+
+void echo_write(uv_write_t *req, int status) {
+    if (status) {
+        fprintf(stderr, "Write error %s\n", uv_strerror(status));
+    }
+    uv_close((uv_handle_t *)req->handle, on_close);
+    free_write_req(req);
+}
+
+void echo_read(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf) {
+    if (nread > 0) {
+        write_req_t *req = (write_req_t*) malloc(sizeof(write_req_t));
+        req->buf = uv_buf_init(buf->base, nread);
+
+        request_table = janet_table(5);
+        headers = janet_table(20);
+        int nparsed = 0;
+        http_parser parser;
+        http_parser_init(&parser, HTTP_REQUEST);
+        nparsed = http_parser_execute(&parser, &settings, buf->base, nread);
+
+        Janet jarg[1];
+        jarg[0] = janet_wrap_table(request_table);
+        Janet janet_response;
+        JanetFiber *fiber = janet_fiber(handler, 64, 1, jarg);
+        JanetFiber *janet_vm_fiber = janet_current_fiber();
+        if (!janet_vm_fiber->env) {
+             janet_vm_fiber->env = janet_table(0);
+        }
+        fiber->env = janet_vm_fiber->env;
+        JanetSignal signal = janet_continue(fiber, jarg[0], &janet_response);
+        if(signal != JANET_SIGNAL_OK) {
+             janet_stacktrace(fiber, janet_response);
+
+             if (nread != UV_EOF)
+                 fprintf(stderr, "Read error %s\n", uv_err_name(nread));
+             uv_close((uv_handle_t*) client, on_close);
+
+             return;
+        }
+
+        sds response_string = http_response(janet_response);
+
+        uv_buf_t res;
+        res.base = response_string;
+        res.len = sdslen(response_string);
+
+        uv_write((uv_write_t*) req, client, &res, 1, echo_write);
+        sdsfree(response_string);
+        return;
+    }
+
+    if (nread < 0) {
+        if (nread != UV_EOF)
+            fprintf(stderr, "Read error %s\n", uv_err_name(nread));
+        uv_close((uv_handle_t*) client, on_close);
+    }
+
+    free(buf->base);
+}
+
+void on_new_connection(uv_stream_t *server, int status) {
+    if (status < 0) {
+        fprintf(stderr, "New connection error %s\n", uv_strerror(status));
+        // error!
+        return;
+    }
+
+    uv_tcp_t *client = (uv_tcp_t*) malloc(sizeof(uv_tcp_t));
+    uv_tcp_init(loop, client);
+    if (uv_accept(server, (uv_stream_t*) client) == 0) {
+        uv_read_start((uv_stream_t*) client, alloc_buffer, echo_read);
+    }
+    else {
+        uv_close((uv_handle_t*) client, on_close);
+    }
+}
+
+/****************************************************************
+ *********************** Parse Headers **************************
+ ****************************************************************/
 
 int message_begin_cb(struct http_parser *parser) {
   (void)parser;
@@ -171,106 +249,61 @@ int headers_complete_cb(http_parser *parser) {
   return 0;
 }
 
-int message_complete_cb(struct http_parser *parser) {
-  (void)parser;
+ int message_complete_cb(struct http_parser *parser) {
+   (void)parser;
 
-  return 0;
-}
+   return 0;
+ }
 
-static int event_handler(sb_Event *e) {
-  if (e->type == SB_EV_REQUEST) {
-
-    request_table = janet_table(5);
-    headers = janet_table(20);
-    int nparsed = 0;
-    http_parser parser;
-    http_parser_init(&parser, HTTP_REQUEST);
-    nparsed = http_parser_execute(&parser, &settings, e->stream->recv_buf.s, e->stream->recv_buf.len);
-
-    // TODO while loop to parse all the streams
-    // keep calling e->stream->next until NULL
-    // multipart
-    //if(nparsed != e->stream->recv_buf.len) {
-      // parse next stream
-    //}
-
-    Janet jarg[1];
-    jarg[0] = janet_wrap_table(request_table);
-    Janet response;
-    JanetFiber *fiber = janet_fiber(handler, 64, 1, jarg);
-    JanetFiber *janet_vm_fiber = janet_current_fiber();
-    if (!janet_vm_fiber->env) {
-        janet_vm_fiber->env = janet_table(0);
-    }
-    fiber->env = janet_vm_fiber->env;
-    JanetSignal signal = janet_continue(fiber, jarg[0], &response);
-    if(signal != JANET_SIGNAL_OK) {
-      janet_stacktrace(fiber, response);
-      return SB_RES_CLOSE;
-    }
-
-    send_http_response(e, response);
-  }
-
-  return SB_RES_OK;
-}
+/****************************************************************
+ *********************** Janet Section **************************
+ ****************************************************************/
 
 Janet cfun_start_server(int32_t argc, Janet *argv) {
-  janet_arity(argc, 2, 3);
+    janet_arity(argc, 2, 3);
 
-  JanetFunction *janet_handler = janet_getfunction(argv, 0);
-  const uint8_t *port = janet_getstring(argv, 1);
-  const uint8_t *ip_address = janet_optstring(argv, argc, 2, NULL);
+    handler = janet_getfunction(argv, 0);
+    int32_t port = janet_getinteger(argv, 1);
+    const uint8_t *ip_address = janet_optstring(argv, argc, 2, NULL);
 
-  settings.on_message_begin     = message_begin_cb;
-  settings.on_header_field      = header_field_cb;
-  settings.on_header_value      = header_value_cb;
-  settings.on_status            = status_cb;
-  settings.on_url               = url_cb;
-  settings.on_body              = body_cb;
-  settings.on_headers_complete  = headers_complete_cb;
-  settings.on_message_complete  = message_complete_cb;
+    settings.on_message_begin     = message_begin_cb;
+    settings.on_header_field      = header_field_cb;
+    settings.on_header_value      = header_value_cb;
+    settings.on_status            = status_cb;
+    settings.on_url               = url_cb;
+    settings.on_body              = body_cb;
+    settings.on_headers_complete  = headers_complete_cb;
+    settings.on_message_complete  = message_complete_cb;
 
-  memset(&opt, 0, sizeof(opt));
+    loop = uv_default_loop();
 
-  opt.port = (char *)port;
-  if(ip_address != NULL) {
-    opt.host = (char *)ip_address;
-  }
-  opt.handler = event_handler;
-  handler = janet_handler;
+    uv_tcp_t server;
+    uv_tcp_init(loop, &server);
 
-  server = sb_new_server(&opt);
+    uv_ip4_addr((const char *)ip_address, (int)port, &addr);
 
-  if (!server) {
-    janet_panicf("failed to intialize server\n");
-  }
+    uv_tcp_bind(&server, (const struct sockaddr*)&addr, 0);
+    int r = uv_listen((uv_stream_t*) &server, DEFAULT_BACKLOG, on_new_connection);
+    if (r) {
+        fprintf(stderr, "Listen error %s\n", uv_strerror(r));
+        janet_panicf("Listen error %s\n", uv_strerror(r));
+        return janet_wrap_nil();
+    }
 
-  return janet_wrap_nil();
-}
+    uv_run(loop, UV_RUN_DEFAULT);
 
-Janet cfun_poll_server(int32_t argc, Janet *argv) {
-  janet_fixarity(argc, 1);
-
-  int32_t timeout = janet_getinteger(argv, 0);
-
-  sb_poll_server(server, timeout);
-
-  return janet_wrap_nil();
+    return janet_wrap_nil();
 }
 
 Janet cfun_stop_server(int32_t argc, Janet *argv) {
   janet_fixarity(argc, 0);
   (void)argv;
 
-  sb_close_server(server);
-
   return janet_wrap_nil();
 }
 
 static const JanetReg cfuns[] = {
     {"start-server", cfun_start_server, NULL},
-    {"poll-server", cfun_poll_server, NULL},
     {"stop-server", cfun_stop_server, NULL},
     {NULL, NULL, NULL}
 };
