@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <signal.h>
 #include <janet.h>
 #include <dirent.h>
 #include <sys/types.h>
@@ -15,6 +16,14 @@ JanetFunction *handler;
 http_parser_settings settings;
 sb_Options opt;
 sb_Server *server;
+int server_running = 1;
+
+static void sig_handler(int signo) {
+  if (signo == SIGINT) {
+    server_running = 0;
+  }
+}
+
 
 void send_http_response(sb_Event *e, Janet res) {
   switch (janet_type(res)) {
@@ -258,6 +267,14 @@ Janet cfun_poll_server(int32_t argc, Janet *argv) {
   return janet_wrap_nil();
 }
 
+Janet cfun_server_running(int32_t argc, Janet *argv) {
+  janet_fixarity(argc, 0);
+  (void)argv;
+
+  return janet_wrap_boolean(server_running);
+}
+
+
 Janet cfun_stop_server(int32_t argc, Janet *argv) {
   janet_fixarity(argc, 0);
   (void)argv;
@@ -271,6 +288,7 @@ static const JanetReg cfuns[] = {
     {"start-server", cfun_start_server, NULL},
     {"poll-server", cfun_poll_server, NULL},
     {"stop-server", cfun_stop_server, NULL},
+    {"server-running?", cfun_server_running, NULL},
     {NULL, NULL, NULL}
 };
 
@@ -278,6 +296,10 @@ extern const unsigned char *halo_lib_embed;
 extern size_t halo_lib_embed_size;
 
 JANET_MODULE_ENTRY(JanetTable *env) {
+    if (signal(SIGINT, sig_handler) == SIG_ERR) {
+      printf("\ncan't catch SIGINT\n");
+    }
+
     janet_cfuns(env, "halo", cfuns);
 
     janet_dobytes(env,
