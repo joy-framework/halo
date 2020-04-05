@@ -102,9 +102,20 @@ void send_http_response(sb_Event *e, Janet res) {
             for (const JanetKV *kv = janet_dictionary_next(headerkvs, headercap, NULL);
                     kv;
                     kv = janet_dictionary_next(headerkvs, headercap, kv)) {
-                const uint8_t *name = janet_to_string(kv->key);
-                const uint8_t *value = janet_to_string(kv->value);
-                sb_send_header(e->stream, (const char *)name, (const char *)value);
+
+              const uint8_t *name = janet_to_string(kv->key);
+
+              int32_t header_len;
+               const Janet *header_items;
+               if (janet_indexed_view(kv->value, &header_items, &header_len)) {
+                 for (int32_t i = 0; i < header_len; i++) {
+                   const uint8_t *value = janet_to_string(header_items[i]);
+                   sb_send_header(e->stream, (const char *)name, (const char *)value);
+                 }
+               } else {
+                 const uint8_t *value = janet_to_string(kv->value);
+                 sb_send_header(e->stream, (const char *)name, (const char *)value);
+               }
             }
 
             if (body_len > 0) {
@@ -143,7 +154,23 @@ int header_field_cb(struct http_parser *parser, const char *p, unsigned long len
 int header_value_cb(struct http_parser *parser, const char *p, unsigned long len) {
   (void)parser;
 
-  janet_table_put(headers, prev_header_name, janet_wrap_string(janet_string((uint8_t *)p, len)));
+  Janet header = janet_table_get(headers, prev_header_name);
+  Janet value = janet_wrap_string(janet_string((uint8_t *)p, len));
+
+  switch (janet_type(header)) {
+    case JANET_NIL:
+      janet_table_put(headers, prev_header_name, value);
+      break;
+    case JANET_ARRAY:
+      janet_array_push(janet_unwrap_array(header), value);
+      break;
+    default: {
+      Janet newHeader[2] = { header, value };
+      janet_table_put(headers, prev_header_name, janet_wrap_array(janet_array_n(newHeader, 2)));
+      break;
+    }
+  }
+
   return 0;
 }
 

@@ -1,4 +1,5 @@
 (import build/halo :as halo)
+(import tester :prefix "" :exit true)
 
 
 (defn logger
@@ -61,7 +62,8 @@
    :body (string "<!doctype html><html><body>
       <h1>Form submitted with " (get request :body) " </h1>
     </body></html>")
-   :headers {"Content-Type" "text/html; charset=utf-8"}})
+   :headers {"Content-Type" "text/html; charset=utf-8"
+             "Set-Cookie" ["a=b" "c=d"]}})
 
 
 (defn redirect [request]
@@ -69,16 +71,29 @@
    :headers {"Location" "/"}})
 
 
+(defn cookie-test [request]
+  {:status 302
+   :body " "
+   :headers {"Location" "/"
+             "Set-Cookie" ["a=b" "c=d"]}})
+
+
 (def routes
   {["GET" "/"] home
    ["GET" "/form"] form
    ["POST" "/form"] post-form
-   ["GET" "/redirect"] redirect})
+   ["GET" "/redirect"] redirect
+   ["POST" "/cookie-test"] cookie-test})
 
 
 (def app (-> (router routes)
-             (static-files)
-             (logger)))
+             (static-files)))
 
 
-(halo/server app 8080)
+(deftest
+  (test "app should handle multiple set-cookie headers"
+    (let [response (app {:method "POST" :uri "/cookie-test"})]
+      (= '("a=b" "c=d") (get-in response [:headers "Set-Cookie"])))))
+
+
+#(halo/server app 8000)

@@ -3,6 +3,7 @@
   :description "Janet bindings for civetweb"
   :author "Sean Walker"
   :license "MIT"
+  :dependencies ["https://github.com/joy-framework/tester"]
   :url "https://github.com/joy-framework/halo"
   :repo "git+https://github.com/joy-framework/halo.git")
 
