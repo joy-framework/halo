@@ -125,14 +125,14 @@ void send_http_response(sb_Event *e, Janet res) {
               sprintf(str, "%d", body_len);
 
               sb_send_header(e->stream, "Content-Length", str);
-              sb_writef(e->stream, (const char *)body_bytes);
+              sb_writef(e->stream, "%s", (const char *)body_bytes);
             }
         }
         break;
       default:
         sb_send_status(e->stream, 500, "Internal server error");
         sb_send_header(e->stream, "Content-Type", "text/plain");
-        sb_writef(e->stream, "Internal Server Error");
+        sb_writef(e->stream, "%s", "Internal Server Error");
         break;
   }
 }
