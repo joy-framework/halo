@@ -565,6 +565,13 @@ int sb_send_header(sb_Stream *st, const char *field, const char *val) {
 }
 
 
+const char *get_filename_ext(const char *filename) {
+  const char *dot = strrchr(filename, '.');
+  if(!dot || dot == filename) return "";
+  return dot + 1;
+}
+
+
 int sb_send_file(sb_Stream *st, const char *filename) {
   int err;
   char buf[32];
@@ -577,12 +584,35 @@ int sb_send_file(sb_Stream *st, const char *filename) {
   fp = fopen(filename, "rb");
   if (!fp) return SB_ECANTOPEN;
 
+  const char *ext = get_filename_ext(filename);
+
   /* Get file size and write headers */
   fseek(fp, 0, SEEK_END);
   sz = ftell(fp);
   sprintf(buf, "%u", (unsigned) sz);
   err = sb_send_header(st, "Content-Length", buf);
   if (err) goto fail;
+
+if (strcmp(ext, "js") == 0) {
+  err = sb_send_header(st, "Content-Type", "text/javascript");
+} else if(strcmp(ext, "css") == 0) {
+  err = sb_send_header(st, "Content-Type", "text/css");
+} else if(strcmp(ext, "svg")) {
+  err = sb_send_header(st, "Content-Type", "text/svg");
+} else if(strcmp(ext, "html") == 0) {
+  err = sb_send_header(st, "Content-Type", "text/html");
+} else if(strcmp(ext, "png") == 0) {
+  err = sb_send_header(st, "Content-Type", "image/png");
+} else if(strcmp(ext, "jpg") == 0 || strcmp(ext, "jpeg") == 0) {
+  err = sb_send_header(st, "Content-Type", "image/jpeg");
+} else if(strcmp(ext, "gif") == 0) {
+  err = sb_send_header(st, "Content-Type", "image/gif");
+} else {
+  err = sb_send_header(st, "Content-Type", "text/plain");
+}
+
+if (err) goto fail;
+
   err = sb_stream_finalize_header(st);
   if (err) goto fail;
 
