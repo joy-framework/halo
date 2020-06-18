@@ -607,6 +607,8 @@ if (strcmp(ext, "js") == 0) {
   err = sb_send_header(st, "Content-Type", "image/jpeg");
 } else if(strcmp(ext, "gif") == 0) {
   err = sb_send_header(st, "Content-Type", "image/gif");
+} else if(strcmp(ext, "ico") == 0) {
+  err = sb_send_header(st, "Content-Type", "image/x-icon");
 } else {
   err = sb_send_header(st, "Content-Type", "text/plain");
 }
