@@ -594,7 +594,7 @@ int sb_send_file(sb_Stream *st, const char *filename) {
   if (err) goto fail;
 
 if (strcmp(ext, "js") == 0) {
-  err = sb_send_header(st, "Content-Type", "text/javascript");
+  err = sb_send_header(st, "Content-Type", "application/javascript");
 } else if(strcmp(ext, "css") == 0) {
   err = sb_send_header(st, "Content-Type", "text/css");
 } else if(strcmp(ext, "svg")) {
