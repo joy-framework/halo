@@ -1,5 +1,4 @@
-(import build/halo :as halo)
-(import tester :prefix "" :exit true)
+(import ../halo :as halo)
 
 
 (defn logger
@@ -9,12 +8,12 @@
     (def start-clock (os/clock))
     (def {:uri uri
           :method method} req)
-    (def ret (handler req))
+    (def res (handler req))
     (def end-clock (os/clock))
-    (def elapsed (string/format "%.3f" (* 1000 (- end-clock start-clock))))
-    (def status (or (get ret :status) 200))
+    (def elapsed (string/format "%.1f" (* 1000 (- end-clock start-clock))))
+    (def status (or (get res :status) 200))
     (print method " " status " " uri " elapsed " elapsed "ms")
-    ret))
+    res))
 
 
 (defn static-files [handler &opt root]
@@ -90,10 +89,9 @@
              (static-files)))
 
 
-(deftest
-  (test "app should handle multiple set-cookie headers"
-    (let [response (app {:method "POST" :uri "/cookie-test"})]
-      (= '("a=b" "c=d") (get-in response [:headers "Set-Cookie"])))))
+(print "app should handle multiple set-cookie headers")
+(let [response (app {:method "POST" :uri "/cookie-test"})]
+  (print (= '("a=b" "c=d") (get-in response [:headers "Set-Cookie"]))))
 
 
-#(halo/server app 8000)
+(halo/server app 9001)
