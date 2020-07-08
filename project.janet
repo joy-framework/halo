@@ -5,3 +5,6 @@
   :license "MIT"
   :url "https://github.com/joy-framework/halo"
   :repo "git+https://github.com/joy-framework/halo.git")
+
+(declare-source
+  :source @["halo.janet"])
