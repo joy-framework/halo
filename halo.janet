@@ -153,8 +153,3 @@
   (default ip-address "localhost")
   (printf "Server listening on [%s:%s] ..." ip-address (string port))
   (net/server ip-address (scan-number (string port)) (connection-handler handler)))
-
-  # (while (server-running?)
-  #   (poll-server 1000))
-
-  #(stop-server))
