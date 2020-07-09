@@ -128,7 +128,12 @@
 (defn- connection-handler
   "A connection handler"
   [handler]
+  # copy handler's dyns into connection handler's
+  (def handler-env (fiber/getenv (fiber/current)))
   (fn [stream]
+    # paste handler's dyns into connection handler's
+    (fiber/setenv (fiber/current) handler-env)
+
     (defer (:close stream)
       (def b @"")
       (while (:read stream 1024 b)
