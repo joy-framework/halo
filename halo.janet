@@ -117,8 +117,9 @@
       (string response-string body))))
 
 
-(defn- http-request [request-string]
-  (let [[method uri version] (request-line request-string)
+(defn- http-request [buf]
+  (let [request-string (string buf)
+        [method uri version] (request-line request-string)
         headers (apply struct (headers request-string))
         body (first (body request-string))]
     {:body body :headers headers :method method :uri uri :version version}))
@@ -131,9 +132,10 @@
     (defer (:close stream)
       (def b @"")
       (while (:read stream 1024 b)
-        (let [res (handler (http-request (string b)))
-              response (http-response res)]
-          (:write stream response))
+        (->> (http-request b)
+             (handler)
+             (http-response)
+             (:write stream))
         (buffer/clear b)))))
 
 
